@@ -1,0 +1,57 @@
+<!-- Lightweight analytics and history extensions -->
+<div id="dashboard-tab" class="tab-content">
+    <section class="glass-effect">
+        <div class="section-header">
+            <i class="fas fa-chart-bar"></i>
+            <h3>Detection Dashboard</h3>
+        </div>
+        <div id="dashboardStatus" class="empty-state"></div>
+        <div class="analytics-grid">
+            <div class="stat-card"><i class="fas fa-layer-group"></i><span>Total Detections</span><strong id="statTotal">0</strong></div>
+            <div class="stat-card"><i class="fas fa-check-circle"></i><span>Real Detections</span><strong id="statReal">0</strong></div>
+            <div class="stat-card"><i class="fas fa-exclamation-triangle"></i><span>Fake Detections</span><strong id="statFake">0</strong></div>
+            <div class="stat-card"><i class="fas fa-percentage"></i><span>Average Confidence</span><strong id="statConfidence">0%</strong></div>
+        </div>
+        <div class="content-section">
+            <h3><i class="fas fa-calendar-alt"></i> Recent Detection Activity</h3>
+            <div id="activityList" class="activity-list"></div>
+        </div>
+    </section>
+</div>
+
+<div id="history-tab" class="tab-content">
+    <section class="glass-effect">
+        <div class="section-header">
+            <i class="fas fa-history"></i>
+            <h3>Detection History</h3>
+        </div>
+        <div class="history-controls">
+            <input id="historySearch" type="search" placeholder="Search filename, hash, or model">
+            <select id="historyResult">
+                <option value="">All results</option>
+                <option value="real">Real</option>
+                <option value="fake">Fake</option>
+            </select>
+            <select id="historyModel"><option value="">All models</option></select>
+            <select id="historySort">
+                <option value="created_at">Newest first</option>
+                <option value="confidence">Confidence</option>
+                <option value="result">Result</option>
+                <option value="filename">Filename</option>
+            </select>
+            <button id="historyApply" class="small-action"><i class="fas fa-filter"></i> Apply</button>
+        </div>
+        <div class="history-table-wrap">
+            <table class="history-table">
+                <thead><tr><th>Date</th><th>File</th><th>Result</th><th>Confidence</th><th>Model</th><th>Action</th></tr></thead>
+                <tbody id="historyBody"><tr><td colspan="6" class="empty-state">Open this tab to load detection history.</td></tr></tbody>
+            </table>
+        </div>
+        <div class="history-pagination">
+            <button id="historyPrevious" class="small-action">Previous</button>
+            <span id="historyPageLabel">Page 1 of 1</span>
+            <button id="historyNext" class="small-action">Next</button>
+        </div>
+        <div id="historyDetail" class="history-detail glass-effect" style="display: none;"></div>
+    </section>
+</div>
