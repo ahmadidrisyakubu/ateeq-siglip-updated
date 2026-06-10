@@ -14,6 +14,7 @@ import time
 import hashlib
 import logging
 import secrets
+import io
 
 # ===============================
 # App initialization
@@ -126,6 +127,13 @@ def generate_file_hash(path):
             h.update(chunk)
     return h.hexdigest()
 
+def generate_report_image(img):
+    report_image = img.copy()
+    report_image.thumbnail((1600, 1600))
+    buffer = io.BytesIO()
+    report_image.save(buffer, "JPEG", quality=85, optimize=True)
+    return buffer.getvalue()
+
 def predict_image(path):
     """
     Predict using the SigLIP model.
@@ -187,6 +195,7 @@ def predict():
         img.save(path, "JPEG", quality=95)
 
         image_width, image_height = img.size
+        report_image_data = generate_report_image(img)
         label, confidence, model_used = predict_image(path)
         file_hash = generate_file_hash(path)
         record_id = None
@@ -202,6 +211,7 @@ def predict():
                 file_hash=file_hash,
                 image_width=image_width,
                 image_height=image_height,
+                image_data=report_image_data,
                 extra_metadata={"model_repository": MODEL_NAME, "inference_device": device},
             )
         except Exception as e:
@@ -211,8 +221,7 @@ def predict():
             "label": label,
             "confidence": confidence,
             "hash": file_hash,
-            "record_id": record_id,
-            "model_used": model_used
+            "record_id": record_id
         })
 
     except Exception as e:

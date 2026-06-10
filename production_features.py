@@ -1,5 +1,4 @@
 import io
-import json
 import logging
 import os
 import uuid
@@ -25,6 +24,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table as SqlTable,
@@ -38,6 +38,7 @@ from sqlalchemy import (
     insert,
     or_,
     select,
+    text,
 )
 from werkzeug.exceptions import HTTPException
 
@@ -59,10 +60,16 @@ detections = SqlTable(
     Column("file_hash", String(64), index=True),
     Column("image_width", Integer),
     Column("image_height", Integer),
+    Column("image_data", LargeBinary),
     Column("metadata_json", JSON),
     Column("client_ip", String(64)),
     Column("user_agent", Text),
 )
+PUBLIC_HISTORY_COLUMNS = [
+    column
+    for column in detections.c
+    if column.name not in {"model_used", "metadata_json", "image_data"}
+]
 
 
 def _database_url():
@@ -89,6 +96,22 @@ engine = _create_engine()
 def initialize_database():
     try:
         metadata.create_all(engine)
+        with engine.begin() as connection:
+            existing_columns = {
+                row[1]
+                for row in connection.execute(text("PRAGMA table_info(detections)"))
+            } if engine.dialect.name == "sqlite" else {
+                row[0]
+                for row in connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'detections'"
+                    )
+                )
+            }
+            if "image_data" not in existing_columns:
+                column_type = "BLOB" if engine.dialect.name == "sqlite" else "BYTEA"
+                connection.execute(text(f"ALTER TABLE detections ADD COLUMN image_data {column_type}"))
         logger.info("Detection history database initialized")
     except Exception:
         logger.exception("Detection history database initialization failed")
@@ -101,7 +124,9 @@ def _serialize(record):
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
         item["created_at"] = created_at.isoformat()
-    item["metadata"] = item.pop("metadata_json", None) or {}
+    item.pop("metadata_json", None)
+    item.pop("model_used", None)
+    item.pop("image_data", None)
     return item
 
 
@@ -116,6 +141,7 @@ def create_detection_record(
     file_hash,
     image_width,
     image_height,
+    image_data,
     extra_metadata=None,
 ):
     record_id = str(uuid.uuid4())
@@ -131,6 +157,7 @@ def create_detection_record(
         "file_hash": file_hash,
         "image_width": image_width,
         "image_height": image_height,
+        "image_data": image_data,
         "metadata_json": extra_metadata or {},
         "client_ip": request.headers.get("X-Forwarded-For", request.remote_addr or "")[:64],
         "user_agent": request.user_agent.string[:1000],
@@ -143,7 +170,7 @@ def create_detection_record(
 def _get_record(record_id):
     with engine.connect() as connection:
         row = connection.execute(
-            select(detections).where(detections.c.id == record_id)
+            select(*PUBLIC_HISTORY_COLUMNS).where(detections.c.id == record_id)
         ).mappings().first()
     return _serialize(row) if row else None
 
@@ -154,7 +181,6 @@ def history_api():
         per_page = min(max(request.args.get("per_page", 20, type=int), 1), 100)
         search = request.args.get("search", "").strip()
         result = request.args.get("result", "").strip().lower()
-        model = request.args.get("model", "").strip()
         sort_by = request.args.get("sort_by", "created_at")
         sort_order = request.args.get("sort_order", "desc")
 
@@ -165,14 +191,10 @@ def history_api():
                 or_(
                     detections.c.original_filename.ilike(term),
                     detections.c.file_hash.ilike(term),
-                    detections.c.model_used.ilike(term),
                 )
             )
         if result in {"real", "fake"}:
             filters.append(detections.c.result == result)
-        if model:
-            filters.append(detections.c.model_used == model)
-
         sort_columns = {
             "created_at": detections.c.created_at,
             "confidence": detections.c.confidence,
@@ -183,7 +205,7 @@ def history_api():
         ordering = asc(sort_column) if sort_order == "asc" else desc(sort_column)
         where_clause = and_(*filters) if filters else None
 
-        query = select(detections)
+        query = select(*PUBLIC_HISTORY_COLUMNS)
         count_query = select(func.count()).select_from(detections)
         if where_clause is not None:
             query = query.where(where_clause)
@@ -194,14 +216,9 @@ def history_api():
             rows = connection.execute(
                 query.order_by(ordering).limit(per_page).offset((page - 1) * per_page)
             ).mappings().all()
-            models = connection.execute(
-                select(detections.c.model_used).distinct().order_by(detections.c.model_used)
-            ).scalars().all()
-
         return jsonify(
             {
                 "records": [_serialize(row) for row in rows],
-                "models": models,
                 "page": page,
                 "per_page": per_page,
                 "total": total,
@@ -264,7 +281,6 @@ def _report_rows(record):
         ["Detection Result", record["result"].title()],
         ["Confidence Score", f'{record["confidence"]:.2f}%'],
         ["Date and Time (UTC)", record["created_at"].replace("T", " ")],
-        ["Model Used", record["model_used"]],
         ["Uploaded File", record["original_filename"]],
         ["File Type", record.get("file_type") or "Not available"],
         ["File Size", f'{record["file_size"]:,} bytes' if record.get("file_size") else "Not available"],
@@ -272,17 +288,20 @@ def _report_rows(record):
         ["SHA-256 Hash", record.get("file_hash") or "Not available"],
         ["Record ID", record["id"]],
     ]
-    for key, value in record.get("metadata", {}).items():
-        rows.append([key.replace("_", " ").title(), json.dumps(value) if isinstance(value, (dict, list)) else str(value)])
     styles = getSampleStyleSheet()
     return [[Paragraph(str(label), styles["BodyText"]), Paragraph(str(value), styles["BodyText"])] for label, value in rows]
 
 
 def report_pdf(record_id, logo_path):
     try:
-        record = _get_record(record_id)
-        if not record:
+        with engine.connect() as connection:
+            row = connection.execute(
+                select(detections).where(detections.c.id == record_id)
+            ).mappings().first()
+        if not row:
             abort(404)
+        image_data = row.get("image_data")
+        record = _serialize(row)
 
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
@@ -318,6 +337,27 @@ def report_pdf(record_id, logo_path):
                 Spacer(1, 14),
             ]
         )
+        if image_data:
+            detected_image = Image(io.BytesIO(image_data))
+            detected_image._restrictSize(160 * mm, 95 * mm)
+            story.extend(
+                [
+                    Paragraph("Detected Image", styles["Heading2"]),
+                    detected_image,
+                    Spacer(1, 14),
+                ]
+            )
+        else:
+            story.extend(
+                [
+                    Paragraph("Detected Image", styles["Heading2"]),
+                    Paragraph(
+                        "Image unavailable for this earlier detection record.",
+                        styles["Italic"],
+                    ),
+                    Spacer(1, 14),
+                ]
+            )
         table = Table(_report_rows(record), colWidths=[48 * mm, 118 * mm], repeatRows=0)
         table.setStyle(
             TableStyle(

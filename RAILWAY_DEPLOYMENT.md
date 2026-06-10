@@ -34,3 +34,5 @@ Add a Railway PostgreSQL service to the project and expose its `DATABASE_URL` va
 Without `DATABASE_URL`, the app uses `instance/detections.db` for local development. Railway's filesystem is ephemeral, so SQLite should not be used for production history unless a persistent volume is mounted.
 
 No changes to the existing Procfile or start command are required.
+
+New detections store a report-optimized image copy in PostgreSQL so downloaded PDF reports can include the detected image. Existing records created before this feature remain available, but their reports cannot display the original image.

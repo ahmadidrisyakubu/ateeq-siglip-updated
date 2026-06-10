@@ -39,19 +39,14 @@ async function loadHistory(page = 1) {
         page,
         search: document.getElementById('historySearch').value,
         result: document.getElementById('historyResult').value,
-        model: document.getElementById('historyModel').value,
         sort_by: document.getElementById('historySort').value
     });
     const body = document.getElementById('historyBody');
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Loading detection history...</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">Loading detection history...</td></tr>';
     try {
         const response = await fetch(`/api/history?${params}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
-        const modelSelect = document.getElementById('historyModel');
-        if (modelSelect.options.length === 1) {
-            data.models.forEach(model => modelSelect.add(new Option(model, model)));
-        }
         body.innerHTML = data.records.length
             ? data.records.map(record => `
                 <tr>
@@ -59,15 +54,14 @@ async function loadHistory(page = 1) {
                     <td>${escapeHtml(record.original_filename)}</td>
                     <td><span class="history-badge ${escapeHtml(record.result)}">${escapeHtml(record.result.toUpperCase())}</span></td>
                     <td>${Number(record.confidence).toFixed(2)}%</td>
-                    <td>${escapeHtml(record.model_used)}</td>
                     <td><button class="small-action" onclick="showHistoryDetail('${record.id}')"><i class="fas fa-eye"></i> Details</button></td>
                 </tr>`).join('')
-            : '<tr><td colspan="6" class="empty-state">No matching detections found.</td></tr>';
+            : '<tr><td colspan="5" class="empty-state">No matching detections found.</td></tr>';
         document.getElementById('historyPageLabel').textContent = `Page ${data.page} of ${data.pages}`;
         document.getElementById('historyPrevious').disabled = data.page <= 1;
         document.getElementById('historyNext').disabled = data.page >= data.pages;
     } catch (error) {
-        body.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(error.message || 'Detection history is temporarily unavailable.')}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(error.message || 'Detection history is temporarily unavailable.')}</td></tr>`;
     }
 }
 
@@ -81,7 +75,6 @@ async function showHistoryDetail(recordId) {
             ['Detection Result', record.result.toUpperCase()],
             ['Confidence', `${Number(record.confidence).toFixed(2)}%`],
             ['Date and Time', formatDate(record.created_at)],
-            ['Model Used', record.model_used],
             ['Uploaded File', record.original_filename],
             ['File Type', record.file_type || 'Not available'],
             ['Image Dimensions', `${record.image_width} x ${record.image_height} px`],
